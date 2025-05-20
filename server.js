@@ -1,88 +1,90 @@
 const express = require('express');
-const bodyParser = require('body-parser');
-const cors = require('cors');
-const { nanoid } = require('nanoid');
-
 const app = express();
+const cors = require('cors');
+const bodyParser = require('body-parser');
+const { v4: uuidv4 } = require('uuid');
+
 app.use(cors());
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
+app.use(express.static('public'));
 
-const users = []; // { _id, username, log: [{description, duration, date}] }
+app.get('/', (req, res) => {
+  res.sendFile(__dirname + '/views/index.html');
+});
 
-// 1. Create user
+// Stockage en mémoire
+let users = [];
+let exercises = [];
+
 app.post('/api/users', (req, res) => {
-  const { username } = req.body;
-  const newUser = { _id: nanoid(), username, log: [] };
-  users.push(newUser);
-  res.json({ _id: newUser._id, username: newUser.username });
+  const username = req.body.username;
+  if (!username) return res.status(400).json({ error: 'Username is required' });
+
+  const user = { username, _id: uuidv4() };
+  users.push(user);
+  res.json(user);
 });
 
-// 2. Get all users
 app.get('/api/users', (req, res) => {
-  res.json(users.map(u => ({ _id: u._id, username: u.username })));
+  res.json(users);
 });
 
-// 3. Add exercise
 app.post('/api/users/:_id/exercises', (req, res) => {
+  const userId = req.params._id;
+  const user = users.find(u => u._id === userId);
+  if (!user) return res.status(400).json({ error: 'User not found' });
+
   const { description, duration, date } = req.body;
-  const user = users.find(u => u._id === req.params._id);
-  if (!user) return res.status(404).json({ error: 'User not found' });
+  if (!description || !duration) return res.status(400).json({ error: 'Missing fields' });
 
   const exercise = {
+    _id: userId,
+    username: user.username,
     description,
     duration: Number(duration),
-    date: date ? new Date(date) : new Date()
+    date: date ? new Date(date).toDateString() : new Date().toDateString()
   };
 
-  user.log.push(exercise);
-
-  res.json({
-    _id: user._id,
-    username: user.username,
-    description: exercise.description,
-    duration: exercise.duration,
-    date: exercise.date.toDateString()
-  });
+  exercises.push({ ...exercise, userId });
+  res.json(exercise);
 });
 
-// 4. Get logs
 app.get('/api/users/:_id/logs', (req, res) => {
-  const user = users.find(u => u._id === req.params._id);
-  if (!user) return res.status(404).json({ error: 'User not found' });
+  const userId = req.params._id;
+  const user = users.find(u => u._id === userId);
+  if (!user) return res.status(400).json({ error: 'User not found' });
 
-  let log = [...user.log];
+  let log = exercises.filter(e => e._id === userId);
 
   const { from, to, limit } = req.query;
 
   if (from) {
     const fromDate = new Date(from);
-    log = log.filter(entry => entry.date >= fromDate);
+    log = log.filter(e => new Date(e.date) >= fromDate);
   }
 
   if (to) {
     const toDate = new Date(to);
-    log = log.filter(entry => entry.date <= toDate);
+    log = log.filter(e => new Date(e.date) <= toDate);
   }
 
   if (limit) {
-    log = log.slice(0, parseInt(limit));
+    log = log.slice(0, Number(limit));
   }
 
   res.json({
-    _id: user._id,
     username: user.username,
     count: log.length,
-    log: log.map(entry => ({
-      description: entry.description,
-      duration: entry.duration,
-      date: entry.date.toDateString()
+    _id: userId,
+    log: log.map(e => ({
+      description: e.description,
+      duration: e.duration,
+      date: e.date
     }))
   });
 });
 
-// Start server
-const PORT = 3000;
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+const listener = app.listen(process.env.PORT || 3000, () => {
+  console.log('App is listening on port ' + listener.address().port);
 });
