@@ -1,40 +1,32 @@
-require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
-const mongoose = require('mongoose');
-const User = require('./models/user');
+const { nanoid } = require('nanoid');
 
 const app = express();
-
 app.use(cors());
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
-mongoose.connect(process.env.MONGO_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
-});
+const users = []; // { _id, username, log: [{description, duration, date}] }
 
-// Create user
-app.post('/api/users', async (req, res) => {
+// 1. Create user
+app.post('/api/users', (req, res) => {
   const { username } = req.body;
-  const newUser = new User({ username });
-  await newUser.save();
-  res.json({ username: newUser.username, _id: newUser._id });
+  const newUser = { _id: nanoid(), username, log: [] };
+  users.push(newUser);
+  res.json({ _id: newUser._id, username: newUser.username });
 });
 
-// Get all users
-app.get('/api/users', async (req, res) => {
-  const users = await User.find({}, '_id username');
-  res.json(users);
+// 2. Get all users
+app.get('/api/users', (req, res) => {
+  res.json(users.map(u => ({ _id: u._id, username: u.username })));
 });
 
-// Add exercise
-app.post('/api/users/:_id/exercises', async (req, res) => {
+// 3. Add exercise
+app.post('/api/users/:_id/exercises', (req, res) => {
   const { description, duration, date } = req.body;
-  const user = await User.findById(req.params._id);
-
+  const user = users.find(u => u._id === req.params._id);
   if (!user) return res.status(404).json({ error: 'User not found' });
 
   const exercise = {
@@ -44,7 +36,6 @@ app.post('/api/users/:_id/exercises', async (req, res) => {
   };
 
   user.log.push(exercise);
-  await user.save();
 
   res.json({
     _id: user._id,
@@ -55,45 +46,43 @@ app.post('/api/users/:_id/exercises', async (req, res) => {
   });
 });
 
-// Get logs
-app.get('/api/users/:_id/logs', async (req, res) => {
-  const { from, to, limit } = req.query;
-  const user = await User.findById(req.params._id);
-
+// 4. Get logs
+app.get('/api/users/:_id/logs', (req, res) => {
+  const user = users.find(u => u._id === req.params._id);
   if (!user) return res.status(404).json({ error: 'User not found' });
 
-  let log = user.log;
+  let log = [...user.log];
+
+  const { from, to, limit } = req.query;
 
   if (from) {
     const fromDate = new Date(from);
-    log = log.filter(e => e.date >= fromDate);
+    log = log.filter(entry => entry.date >= fromDate);
   }
 
   if (to) {
     const toDate = new Date(to);
-    log = log.filter(e => e.date <= toDate);
+    log = log.filter(entry => entry.date <= toDate);
   }
 
   if (limit) {
-    log = log.slice(0, Number(limit));
+    log = log.slice(0, parseInt(limit));
   }
 
-  const formattedLog = log.map(e => ({
-    description: e.description,
-    duration: e.duration,
-    date: e.date.toDateString()
-  }));
-
   res.json({
-    username: user.username,
-    count: formattedLog.length,
     _id: user._id,
-    log: formattedLog
+    username: user.username,
+    count: log.length,
+    log: log.map(entry => ({
+      description: entry.description,
+      duration: entry.duration,
+      date: entry.date.toDateString()
+    }))
   });
 });
 
-// Launch server
-const port = process.env.PORT || 3000;
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
+// Start server
+const PORT = 3000;
+app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
 });
